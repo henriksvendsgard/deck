@@ -644,6 +644,8 @@ final class Switcher {
         panel.setFrame(frame, display: false)
         grid.frame = NSRect(origin: .zero, size: size)
         grid.needsDisplay = true
+        fadeGeneration += 1 // avbryt en eventuell fade-out som pågår
+        panel.alphaValue = 1
         panel.orderFrontRegardless()
     }
 
@@ -676,8 +678,23 @@ final class Switcher {
         active = false
         pendingShow?.cancel()
         pendingShow = nil
-        panel.orderOut(nil)
+        guard panel.isVisible else { return }
+        // Kort, subtil fade-out som i macOS. Generasjonsteller hindrer at en gammel
+        // fade skjuler panelet hvis Cmd+Tab trykkes på nytt mens den pågår.
+        fadeGeneration += 1
+        let gen = fadeGeneration
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.15
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            guard let self, gen == self.fadeGeneration, !self.active else { return }
+            self.panel.orderOut(nil)
+            self.panel.alphaValue = 1
+        })
     }
+
+    var fadeGeneration = 0
 
     func commit() {
         guard active, items.indices.contains(selected) else { close(); return }
