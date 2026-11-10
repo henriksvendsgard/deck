@@ -593,6 +593,31 @@ let tapCallback: CGEventTapCallBack = { _, type, event, _ in
 
 // MARK: - App
 
+/// Menylinje-ikon: to stablede vinduer, det fremste fylt. Template-bilde,
+/// så macOS farger det hvitt eller mørkt etter menylinja.
+func menuBarIcon() -> NSImage {
+    let img = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { _ in
+        NSColor.black.set()
+        let back = NSBezierPath(roundedRect: NSRect(x: 1.8, y: 2.8, width: 10, height: 8.5),
+                                xRadius: 2.2, yRadius: 2.2)
+        back.lineWidth = 1.5
+        back.stroke()
+        let front = NSBezierPath(roundedRect: NSRect(x: 5.2, y: 6.2, width: 11, height: 9.3),
+                                 xRadius: 2.4, yRadius: 2.4)
+        // Litt luft rundt det fremste vinduet, så kantene ikke flyter sammen.
+        NSGraphicsContext.current?.compositingOperation = .clear
+        let gap = NSBezierPath(roundedRect: NSRect(x: 4.2, y: 5.2, width: 13, height: 11.3),
+                               xRadius: 3.2, yRadius: 3.2)
+        gap.fill()
+        NSGraphicsContext.current?.compositingOperation = .sourceOver
+        front.fill()
+        return true
+    }
+    img.isTemplate = true
+    img.accessibilityDescription = "Vindusbytter"
+    return img
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var statusItem: NSStatusItem!
     let statusLine = NSMenuItem(title: "Venter på tilgang …", action: nil, keyEquivalent: "")
@@ -602,8 +627,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "rectangle.on.rectangle",
-                                           accessibilityDescription: "Vindusbytter")
+        statusItem.button?.image = menuBarIcon()
         let menu = NSMenu()
         menu.delegate = self
         statusLine.isEnabled = false
