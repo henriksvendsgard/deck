@@ -265,7 +265,7 @@ enum Layout {
     static let padTop: CGFloat = 23        // gir ~36 pt luft over ikonmotivet
     static let padBottom: CGFloat = 8
     static let corner: CGFloat = 64        // panelets hjørneradius
-    static let highlightPad: CGFloat = 7   // markeringen går så langt utenfor ikonmotivet
+    static let highlightPad: CGFloat = 8  // markeringen går så langt utenfor ikonmotivet
     static let highlightCorner: CGFloat = 32
 }
 
