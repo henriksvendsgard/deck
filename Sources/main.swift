@@ -252,15 +252,19 @@ func focus(_ item: WinItem) {
 
 // MARK: - UI
 
+// Mål tatt fra macOS 26 sin egen Cmd+Tab.
 enum Layout {
-    static let icon: CGFloat = 84          // app-ikonet
-    static let itemW: CGFloat = 108        // én celle
-    static let iconTop: CGFloat = 12
-    static let labelH: CGFloat = 20        // tittel under valgt ikon
-    static let itemH: CGFloat = iconTop + icon + 12 + labelH
-    static let pad: CGFloat = 14           // innvendig marg i panelet
-    static let corner: CGFloat = 30        // panelets hjørneradius
-    static let highlightCorner: CGFloat = 20
+    static let icon: CGFloat = 128         // tegneflate for ikonet (inkl. ikonets innebygde marg)
+    static let iconInset: CGFloat = 13     // macOS-ikoner har ~10 % luft rundt selve motivet
+    static let itemW: CGFloat = 134        // én celle
+    static let iconTop: CGFloat = 0
+    static let labelGap: CGFloat = 3
+    static let labelH: CGFloat = 15        // tittel under valgt ikon
+    static let itemH: CGFloat = iconTop + icon - iconInset + labelGap + labelH + 2
+    static let pad: CGFloat = 16           // innvendig marg i panelet
+    static let corner: CGFloat = 40        // panelets hjørneradius
+    static let highlightPad: CGFloat = 7   // markeringen går så langt utenfor ikonmotivet
+    static let highlightCorner: CGFloat = 26
 }
 
 final class SwitcherPanel: NSPanel {
@@ -311,9 +315,15 @@ final class GridView: NSView {
         for (i, it) in items.enumerated() {
             let ir = iconRect(for: i)
             if i == selected {
-                NSColor.labelColor.withAlphaComponent(0.13).setFill()
-                NSBezierPath(roundedRect: ir.insetBy(dx: -10, dy: -10),
-                             xRadius: Layout.highlightCorner, yRadius: Layout.highlightCorner).fill()
+                let hr = ir.insetBy(dx: Layout.iconInset - Layout.highlightPad,
+                                    dy: Layout.iconInset - Layout.highlightPad)
+                let path = NSBezierPath(roundedRect: hr, xRadius: Layout.highlightCorner,
+                                        yRadius: Layout.highlightCorner)
+                NSColor.white.withAlphaComponent(0.20).setFill()
+                path.fill()
+                NSColor.white.withAlphaComponent(0.35).setStroke()
+                path.lineWidth = 1
+                path.stroke()
             }
             it.icon.draw(in: ir, from: .zero, operation: .sourceOver,
                          fraction: it.minimized ? 0.45 : 1, respectFlipped: true, hints: nil)
@@ -324,7 +334,7 @@ final class GridView: NSView {
         para.alignment = .center
         para.lineBreakMode = .byTruncatingTail
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
             .foregroundColor: NSColor.labelColor,
             .paragraphStyle: para,
         ]
@@ -333,7 +343,8 @@ final class GridView: NSView {
         let textW = min(title.size(withAttributes: attrs).width + 4, bounds.width - 2 * Layout.pad)
         var x = ir.midX - textW / 2
         x = max(Layout.pad, min(x, bounds.width - Layout.pad - textW))
-        title.draw(with: NSRect(x: x, y: ir.maxY + 12, width: textW, height: Layout.labelH),
+        title.draw(with: NSRect(x: x, y: ir.maxY - Layout.iconInset + Layout.labelGap,
+                                width: textW, height: Layout.labelH),
                    options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attrs)
     }
 
@@ -383,7 +394,7 @@ final class Switcher {
         if #available(macOS 26, *) {
             // Liquid Glass, som systemets egen Cmd+Tab i macOS 26.
             let glass = NSGlassEffectView()
-            glass.style = .regular
+            glass.style = .clear
             glass.cornerRadius = Layout.corner
             glass.contentView = grid
             panel.contentView = glass
