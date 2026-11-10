@@ -431,9 +431,9 @@ final class GridView: NSView {
                          fraction: it.minimized ? 0.45 : 1, respectFlipped: true, hints: nil)
             let visible = ir.insetBy(dx: Layout.iconInset, dy: Layout.iconInset)
 
-            // Prikk under tittelen på apper som kjører uten vinduer (som i Dock).
+            // Prikk under ikonet på apper som kjører uten vinduer (som i Dock).
             if it.windowless {
-                let y = visible.maxY + Layout.labelGap + Layout.labelH + 2
+                let y = visible.maxY + 3
                 NSColor.labelColor.withAlphaComponent(0.75).setFill()
                 NSBezierPath(ovalIn: NSRect(x: visible.midX - 2.5, y: y, width: 5, height: 5)).fill()
             }
