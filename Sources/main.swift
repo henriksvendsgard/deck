@@ -253,10 +253,14 @@ func focus(_ item: WinItem) {
 // MARK: - UI
 
 enum Layout {
-    static let itemW: CGFloat = 132
-    static let itemH: CGFloat = 132
-    static let pad: CGFloat = 14
-    static let icon: CGFloat = 72
+    static let icon: CGFloat = 84          // app-ikonet
+    static let itemW: CGFloat = 108        // én celle
+    static let iconTop: CGFloat = 12
+    static let labelH: CGFloat = 20        // tittel under valgt ikon
+    static let itemH: CGFloat = iconTop + icon + 12 + labelH
+    static let pad: CGFloat = 14           // innvendig marg i panelet
+    static let corner: CGFloat = 30        // panelets hjørneradius
+    static let highlightCorner: CGFloat = 20
 }
 
 final class SwitcherPanel: NSPanel {
@@ -269,7 +273,6 @@ final class SwitcherPanel: NSPanel {
         hasShadow = true
         hidesOnDeactivate = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
-        appearance = NSAppearance(named: .vibrantDark)
     }
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -296,31 +299,42 @@ final class GridView: NSView {
         items.indices.first { rect(for: $0).contains(p) }
     }
 
+    func iconRect(for i: Int) -> NSRect {
+        let r = rect(for: i)
+        return NSRect(x: r.midX - Layout.icon / 2, y: r.minY + Layout.iconTop,
+                      width: Layout.icon, height: Layout.icon)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
+        // Som macOS' egen Cmd+Tab: bare ikoner, avrundet markering rundt valgt,
+        // og tittelen vises kun under det valgte.
+        for (i, it) in items.enumerated() {
+            let ir = iconRect(for: i)
+            if i == selected {
+                NSColor.labelColor.withAlphaComponent(0.13).setFill()
+                NSBezierPath(roundedRect: ir.insetBy(dx: -10, dy: -10),
+                             xRadius: Layout.highlightCorner, yRadius: Layout.highlightCorner).fill()
+            }
+            it.icon.draw(in: ir, from: .zero, operation: .sourceOver,
+                         fraction: it.minimized ? 0.45 : 1, respectFlipped: true, hints: nil)
+        }
+
+        guard items.indices.contains(selected) else { return }
         let para = NSMutableParagraphStyle()
         para.alignment = .center
-        para.lineBreakMode = .byWordWrapping
+        para.lineBreakMode = .byTruncatingTail
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-            .foregroundColor: NSColor.white,
+            .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+            .foregroundColor: NSColor.labelColor,
             .paragraphStyle: para,
         ]
-        for (i, it) in items.enumerated() {
-            let r = rect(for: i)
-            if i == selected {
-                NSColor.white.withAlphaComponent(0.18).setFill()
-                NSBezierPath(roundedRect: r.insetBy(dx: 4, dy: 4), xRadius: 12, yRadius: 12).fill()
-            }
-            let iconRect = NSRect(x: r.midX - Layout.icon / 2, y: r.minY + 12,
-                                  width: Layout.icon, height: Layout.icon)
-            it.icon.draw(in: iconRect, from: .zero, operation: .sourceOver,
-                         fraction: it.minimized ? 0.45 : 1, respectFlipped: true, hints: nil)
-            let textRect = NSRect(x: r.minX + 8, y: iconRect.maxY + 6,
-                                  width: Layout.itemW - 16, height: 30)
-            (it.title as NSString).draw(with: textRect,
-                                        options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
-                                        attributes: attrs)
-        }
+        let title = items[selected].title as NSString
+        let ir = iconRect(for: selected)
+        let textW = min(title.size(withAttributes: attrs).width + 4, bounds.width - 2 * Layout.pad)
+        var x = ir.midX - textW / 2
+        x = max(Layout.pad, min(x, bounds.width - Layout.pad - textW))
+        title.draw(with: NSRect(x: x, y: ir.maxY + 12, width: textW, height: Layout.labelH),
+                   options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attrs)
     }
 
     override func updateTrackingAreas() {
@@ -365,14 +379,24 @@ final class Switcher {
     let grid = GridView()
 
     init() {
-        let blur = NSVisualEffectView()
-        blur.material = .hudWindow
-        blur.blendingMode = .behindWindow
-        blur.state = .active
-        blur.maskImage = roundedMask(18)
         grid.autoresizingMask = [.width, .height]
-        blur.addSubview(grid)
-        panel.contentView = blur
+        if #available(macOS 26, *) {
+            // Liquid Glass, som systemets egen Cmd+Tab i macOS 26.
+            let glass = NSGlassEffectView()
+            glass.style = .regular
+            glass.cornerRadius = Layout.corner
+            glass.contentView = grid
+            panel.contentView = glass
+            panel.hasShadow = false // glasset tegner sin egen kant og skygge
+        } else {
+            let blur = NSVisualEffectView()
+            blur.material = .hudWindow
+            blur.blendingMode = .behindWindow
+            blur.state = .active
+            blur.maskImage = roundedMask(Layout.corner)
+            blur.addSubview(grid)
+            panel.contentView = blur
+        }
         grid.onHover = { [weak self] i in self?.select(i) }
         grid.onClick = { [weak self] i in self?.select(i); self?.commit() }
     }
@@ -638,6 +662,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         setNativeCommandTab(enabled: true)
     }
+}
+
+// `Vindusbytter --preview` viser panelet med kjørende apper i 8 sekunder (for å se på utseendet).
+if CommandLine.arguments.contains("--preview") {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.prefix(8)
+    switcher.items = apps.map {
+        WinItem(app: $0, element: AXUIElementCreateApplication($0.processIdentifier),
+                title: $0.localizedName ?? "", wid: 0, minimized: false, icon: $0.icon ?? NSImage())
+    }
+    switcher.active = true
+    switcher.selected = min(1, max(0, switcher.items.count - 1))
+    DispatchQueue.main.async { switcher.showPanel() }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 8) { exit(0) }
+    app.run()
 }
 
 // `Vindusbytter --restore` slår på macOS' egen Cmd+Tab igjen og avslutter (nødbrems).
