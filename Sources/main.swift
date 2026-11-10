@@ -435,7 +435,7 @@ final class GridView: NSView {
             if it.windowless {
                 let y = visible.maxY + 3
                 NSColor.labelColor.withAlphaComponent(0.75).setFill()
-                NSBezierPath(ovalIn: NSRect(x: visible.midX - 2.5, y: y, width: 5, height: 5)).fill()
+                NSBezierPath(ovalIn: NSRect(x: visible.midX - 2, y: y, width: 4, height: 4)).fill()
             }
 
             // Rødt varselmerke øverst til høyre, som i macOS.
