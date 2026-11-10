@@ -4,7 +4,7 @@ A Cmd+Tab window switcher for macOS that looks like the system switcher but show
 
 - Takes over **Cmd+Tab**: one item per window, most recently used first
 - Windows on **all Spaces**, plus minimized and hidden ones
-- Apps that are running without windows go last, with a small dot under them (optional)
+- Optionally, apps running without windows go last with a small dot under them (off by default)
 - Red **notification badges**, read from the Dock (optional)
 - **Liquid Glass** look on macOS 26, measured against the system switcher
 - **Cmd+Q** quits the selected app and **Cmd+W** closes the selected window, without leaving the switcher

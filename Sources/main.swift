@@ -101,15 +101,17 @@ struct WinItem {
     var badge: String? = nil    // notification badge from the Dock (e.g. "7")
 }
 
-/// Settings (stored in UserDefaults, both on by default).
+/// Settings (stored in UserDefaults). Windowless apps are off and badges on by default.
 enum Settings {
-    static func flag(_ key: String) -> Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
+    static func flag(_ key: String, default def: Bool) -> Bool {
+        UserDefaults.standard.object(forKey: key) as? Bool ?? def
+    }
     static func set(_ key: String, _ v: Bool) { UserDefaults.standard.set(v, forKey: key) }
     static var showWindowless: Bool {
-        get { flag("showWindowlessApps") } set { set("showWindowlessApps", newValue) }
+        get { flag("showWindowlessApps", default: false) } set { set("showWindowlessApps", newValue) }
     }
     static var showBadges: Bool {
-        get { flag("showBadges") } set { set("showBadges", newValue) }
+        get { flag("showBadges", default: true) } set { set("showBadges", newValue) }
     }
 }
 
