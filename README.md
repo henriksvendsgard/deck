@@ -1,6 +1,18 @@
-# Deck
+<p align="center">
+  <img src="docs/icon.png" width="160" alt="Deck app icon">
+</p>
 
-A Cmd+Tab window switcher for macOS that looks like the system switcher but shows **every window**, not just every app.
+<h1 align="center">Deck</h1>
+
+<p align="center">
+  A Cmd+Tab window switcher for macOS that looks like the system switcher but shows <b>every window</b>, not just every app.
+</p>
+
+<p align="center">
+  <a href="https://github.com/henriksvendsgard/deck/releases/latest"><b>Download</b></a> ·
+  <a href="#install">Install</a> ·
+  <a href="#build-from-source">Build from source</a>
+</p>
 
 - Takes over **Cmd+Tab**: one item per window, most recently used first
 - Windows on **all Spaces**, plus minimized and hidden ones
