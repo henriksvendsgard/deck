@@ -296,7 +296,10 @@ final class GridView: NSView {
 
     func rect(for i: Int) -> NSRect {
         let r = i / cols, c = i % cols
-        return NSRect(x: Layout.pad + CGFloat(c) * Layout.itemW,
+        // Siste rad kan ha færre ikoner – sentrer dem.
+        let inRow = min(cols, items.count - r * cols)
+        let offset = CGFloat(cols - inRow) * Layout.itemW / 2
+        return NSRect(x: Layout.pad + offset + CGFloat(c) * Layout.itemW,
                       y: Layout.padTop + CGFloat(r) * Layout.itemH,
                       width: Layout.itemW, height: Layout.itemH)
     }
