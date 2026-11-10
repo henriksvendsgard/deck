@@ -258,11 +258,13 @@ enum Layout {
     static let iconInset: CGFloat = 13     // macOS-ikoner har ~10 % luft rundt selve motivet
     static let itemW: CGFloat = 134        // én celle
     static let iconTop: CGFloat = 0
-    static let labelGap: CGFloat = 3
+    static let labelGap: CGFloat = 12      // fra ikonmotivet ned til tittelen
     static let labelH: CGFloat = 15        // tittel under valgt ikon
-    static let itemH: CGFloat = iconTop + icon - iconInset + labelGap + labelH + 2
-    static let pad: CGFloat = 16           // innvendig marg i panelet
-    static let corner: CGFloat = 40        // panelets hjørneradius
+    static let itemH: CGFloat = iconTop + icon - iconInset + labelGap + labelH
+    static let pad: CGFloat = 18           // marg til venstre/høyre
+    static let padTop: CGFloat = 23        // gir ~36 pt luft over ikonmotivet
+    static let padBottom: CGFloat = 8
+    static let corner: CGFloat = 64        // panelets hjørneradius
     static let highlightPad: CGFloat = 7   // markeringen går så langt utenfor ikonmotivet
     static let highlightCorner: CGFloat = 26
 }
@@ -295,7 +297,7 @@ final class GridView: NSView {
     func rect(for i: Int) -> NSRect {
         let r = i / cols, c = i % cols
         return NSRect(x: Layout.pad + CGFloat(c) * Layout.itemW,
-                      y: Layout.pad + CGFloat(r) * Layout.itemH,
+                      y: Layout.padTop + CGFloat(r) * Layout.itemH,
                       width: Layout.itemW, height: Layout.itemH)
     }
 
@@ -312,6 +314,24 @@ final class GridView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         // Som macOS' egen Cmd+Tab: bare ikoner, avrundet markering rundt valgt,
         // og tittelen vises kun under det valgte.
+
+        // Lys glasskant: sterkest øverst, svakere nederst.
+        let rim = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+                               xRadius: Layout.corner - 0.5, yRadius: Layout.corner - 0.5)
+        if let g = NSGradient(colors: [NSColor.white.withAlphaComponent(0.55),
+                                       NSColor.white.withAlphaComponent(0.12),
+                                       NSColor.white.withAlphaComponent(0.30)]),
+           let ctx = NSGraphicsContext.current?.cgContext {
+            // Tegn kanten som gradient ved å klippe til selve streken (flippet view: 90° = ovenfra og ned).
+            ctx.saveGState()
+            ctx.addPath(rim.cgPath)
+            ctx.setLineWidth(1.2)
+            ctx.replacePathWithStrokedPath()
+            ctx.clip()
+            g.draw(in: bounds, angle: 90)
+            ctx.restoreGState()
+        }
+
         for (i, it) in items.enumerated() {
             let ir = iconRect(for: i)
             if i == selected {
@@ -334,7 +354,7 @@ final class GridView: NSView {
         para.alignment = .center
         para.lineBreakMode = .byTruncatingTail
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
             .foregroundColor: NSColor.labelColor,
             .paragraphStyle: para,
         ]
@@ -395,6 +415,7 @@ final class Switcher {
             // Liquid Glass, som systemets egen Cmd+Tab i macOS 26.
             let glass = NSGlassEffectView()
             glass.style = .clear
+            glass.tintColor = NSColor.white.withAlphaComponent(0.10) // litt lysere, som systemets
             glass.cornerRadius = Layout.corner
             glass.contentView = grid
             panel.contentView = glass
@@ -502,7 +523,7 @@ final class Switcher {
         let cols = min(items.count, maxCols)
         let rows = (items.count + cols - 1) / cols
         let size = NSSize(width: CGFloat(cols) * Layout.itemW + 2 * Layout.pad,
-                          height: CGFloat(rows) * Layout.itemH + 2 * Layout.pad)
+                          height: CGFloat(rows) * Layout.itemH + Layout.padTop + Layout.padBottom)
         let frame = NSRect(x: vf.midX - size.width / 2, y: vf.midY - size.height / 2,
                            width: size.width, height: size.height)
         grid.items = items

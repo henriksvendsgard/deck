@@ -9,7 +9,7 @@ mkdir -p "$APP/Contents/MacOS"
 cp Info.plist "$APP/Contents/Info.plist"
 mkdir -p "$APP/Contents/Resources"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/"
-swiftc -O -swift-version 5 -target arm64-apple-macos13 \
+swiftc -O -swift-version 5 -target arm64-apple-macos14 \
   Sources/main.swift -o "$APP/Contents/MacOS/Vindusbytter"
 codesign --force --sign - "$APP"
 echo "Bygget: $APP"
