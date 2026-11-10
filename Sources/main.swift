@@ -101,6 +101,18 @@ struct WinItem {
     var badge: String? = nil    // varselmerke fra Dock (f.eks. «7»)
 }
 
+/// Innstillinger (lagres i UserDefaults, begge er på som standard).
+enum Settings {
+    static func flag(_ key: String) -> Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
+    static func set(_ key: String, _ v: Bool) { UserDefaults.standard.set(v, forKey: key) }
+    static var showWindowless: Bool {
+        get { flag("showWindowlessApps") } set { set("showWindowlessApps", newValue) }
+    }
+    static var showBadges: Bool {
+        get { flag("showBadges") } set { set("showBadges", newValue) }
+    }
+}
+
 /// Apper, sist aktivert først (for rekkefølgen på apper uten vinduer).
 var appMRU: [pid_t] = []
 
@@ -234,14 +246,14 @@ func collectWindows() -> [WinItem] {
         for w in cache.byPid[pid] ?? [] { add(w, checkExists: true) }
 
         // Apper som kjører uten vinduer kommer med sist, som i AltTab.
-        if !items.contains(where: { $0.app.processIdentifier == pid }) {
+        if Settings.showWindowless && !items.contains(where: { $0.app.processIdentifier == pid }) {
             items.append(WinItem(app: app, element: axApp, title: appName, wid: 0,
                                  minimized: false, icon: icon, windowless: true))
         }
     }
 
     // Varselmerker fra Dock.
-    let badges = dockBadges()
+    let badges = Settings.showBadges ? dockBadges() : [:]
     if !badges.isEmpty {
         for i in items.indices {
             if let url = items[i].app.bundleURL { items[i].badge = badges[normalizedPath(url)] }
@@ -419,10 +431,11 @@ final class GridView: NSView {
                          fraction: it.minimized ? 0.45 : 1, respectFlipped: true, hints: nil)
             let visible = ir.insetBy(dx: Layout.iconInset, dy: Layout.iconInset)
 
-            // Prikk under apper som kjører uten vinduer (som i Dock).
+            // Prikk under tittelen på apper som kjører uten vinduer (som i Dock).
             if it.windowless {
+                let y = visible.maxY + Layout.labelGap + Layout.labelH + 2
                 NSColor.labelColor.withAlphaComponent(0.75).setFill()
-                NSBezierPath(ovalIn: NSRect(x: visible.midX - 2, y: visible.maxY + 3, width: 4, height: 4)).fill()
+                NSBezierPath(ovalIn: NSRect(x: visible.midX - 2.5, y: y, width: 5, height: 5)).fill()
             }
 
             // Rødt varselmerke øverst til høyre, som i macOS.
@@ -450,16 +463,18 @@ final class GridView: NSView {
     }
 
     func drawBadge(_ text: String, iconRect r: NSRect) {
+        // Mål fra macOS 26: ~46 pt rund prikk, sentrert 13 pt inn og 12 pt ned fra hjørnet.
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 16, weight: .medium),
+            .font: NSFont.systemFont(ofSize: 25, weight: .regular),
             .foregroundColor: NSColor.white,
         ]
         let str = text as NSString
         let ts = str.size(withAttributes: attrs)
-        let h: CGFloat = 28
-        let w = max(h, ts.width + 16)
-        let center = NSPoint(x: r.maxX - 12, y: r.minY + 12)
-        let rect = NSRect(x: min(center.x - w / 2, r.maxX + 8 - w), y: center.y - h / 2, width: w, height: h)
+        let h: CGFloat = 46
+        let w = max(h, ts.width + 22)
+        let center = NSPoint(x: r.maxX - 13, y: r.minY + 12)
+        // Brede merker (f.eks. «128») vokser mot venstre fra høyrekanten.
+        let rect = NSRect(x: center.x + h / 2 - w, y: center.y - h / 2, width: w, height: h)
         NSColor.systemRed.setFill()
         NSBezierPath(roundedRect: rect, xRadius: h / 2, yRadius: h / 2).fill()
         str.draw(at: NSPoint(x: rect.midX - ts.width / 2, y: rect.midY - ts.height / 2), withAttributes: attrs)
@@ -715,6 +730,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var statusItem: NSStatusItem!
     let statusLine = NSMenuItem(title: "Venter på tilgang …", action: nil, keyEquivalent: "")
     let loginItem = NSMenuItem(title: "Start ved innlogging", action: #selector(toggleLogin), keyEquivalent: "")
+    let windowlessItem = NSMenuItem(title: "Vis apper uten vinduer", action: #selector(toggleWindowless), keyEquivalent: "")
+    let badgesItem = NSMenuItem(title: "Vis varselmerker", action: #selector(toggleBadges), keyEquivalent: "")
     var retryTimer: Timer?
     var cacheTimer: Timer?
 
@@ -725,6 +742,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         statusLine.isEnabled = false
         menu.addItem(statusLine)
+        menu.addItem(.separator())
+        windowlessItem.target = self
+        badgesItem.target = self
+        menu.addItem(windowlessItem)
+        menu.addItem(badgesItem)
         menu.addItem(.separator())
         loginItem.target = self
         menu.addItem(loginItem)
@@ -795,7 +817,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if svc.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
     }
 
+    @objc func toggleWindowless() { Settings.showWindowless.toggle() }
+    @objc func toggleBadges() { Settings.showBadges.toggle() }
+
     func menuWillOpen(_ menu: NSMenu) {
+        windowlessItem.state = Settings.showWindowless ? .on : .off
+        badgesItem.state = Settings.showBadges ? .on : .off
         switch SMAppService.mainApp.status {
         case .enabled:
             loginItem.state = .on
