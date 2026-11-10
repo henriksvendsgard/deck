@@ -1,12 +1,12 @@
-// Vindusbytter – en enkel Cmd+Tab-vindusbytter for macOS.
-// Viser ett element per vindu (app-ikon + vindustittel), sortert etter sist brukt,
-// også vinduer på andre Spaces.
+// Deck – a Cmd+Tab window switcher for macOS.
+// Shows one item per window (app icon + window title), most recently used first,
+// including windows on other Spaces.
 
 import Cocoa
 import ApplicationServices
 import ServiceManagement
 
-// MARK: - Private API-er (lastes dynamisk, så appen tåler at de mangler)
+// MARK: - Private APIs (loaded dynamically so the app survives if they are missing)
 
 typealias AXGetWindowFn = @convention(c) (AXUIElement, UnsafeMutablePointer<CGWindowID>) -> AXError
 typealias AXCreateWithRemoteTokenFn = @convention(c) (CFData) -> Unmanaged<AXUIElement>?
@@ -34,13 +34,13 @@ let copySpacesForWindows = load(skyLight, "SLSCopySpacesForWindows", "CGSCopySpa
 let setFrontProcess = load(skyLight, "_SLPSSetFrontProcessWithOptions", as: SetFrontProcessFn.self)
 let postEventRecord = load(skyLight, "SLPSPostEventRecordTo", as: PostEventRecordFn.self)
 
-/// Slår macOS' egen Cmd+Tab (1) og Cmd+Shift+Tab (2) av eller på.
+/// Turns the system Cmd+Tab (1) and Cmd+Shift+Tab (2) hotkeys on or off.
 func setNativeCommandTab(enabled: Bool) {
     guard let f = setSymbolicHotKey else { return }
     for id: Int32 in [1, 2] { _ = f(id, enabled) }
 }
 
-// MARK: - AX-hjelpere
+// MARK: - AX helpers
 
 func axAttr(_ el: AXUIElement, _ name: String) -> CFTypeRef? {
     var v: CFTypeRef?
@@ -58,7 +58,7 @@ func isRealWindow(_ el: AXUIElement) -> Bool {
     return subrole == kAXStandardWindowSubrole || subrole == kAXDialogSubrole
 }
 
-/// Antall Spaces et vindu ligger på (0 = vinduet er skjult/ikke i bruk).
+/// Number of Spaces a window is on (0 = the window is ordered out / unused).
 func spaceCount(_ wid: CGWindowID) -> Int? {
     guard let conn = mainConnection, let copy = copySpacesForWindows else { return nil }
     let arr = [NSNumber(value: wid)] as CFArray
@@ -66,8 +66,8 @@ func spaceCount(_ wid: CGWindowID) -> Int? {
     return CFArrayGetCount(res)
 }
 
-/// AX gir bare vinduer på gjeldende Space. For å finne resten prøver vi alle
-/// element-ID-er for appen (samme teknikk som AltTab bruker).
+/// AX only returns windows on the current Space. To find the rest we try every
+/// element ID for the app (the same technique AltTab uses).
 func bruteForceWindows(pid: pid_t) -> [AXUIElement] {
     guard let create = axCreateWithRemoteToken else { return [] }
     var token = Data(count: 20)
@@ -80,7 +80,7 @@ func bruteForceWindows(pid: pid_t) -> [AXUIElement] {
         guard let el = create(token as CFData)?.takeRetainedValue() else { continue }
         var v: CFTypeRef?
         let err = AXUIElementCopyAttributeValue(el, kAXSubroleAttribute as CFString, &v)
-        if err == .cannotComplete { break } // appen svarer ikke – gi opp denne
+        if err == .cannotComplete { break } // app is not responding – give up on it
         if err == .success, let s = v as? String, s == kAXStandardWindowSubrole || s == kAXDialogSubrole {
             found.append(el)
         }
@@ -88,7 +88,7 @@ func bruteForceWindows(pid: pid_t) -> [AXUIElement] {
     return found
 }
 
-// MARK: - Vinduer
+// MARK: - Windows
 
 struct WinItem {
     let app: NSRunningApplication
@@ -97,11 +97,11 @@ struct WinItem {
     let wid: CGWindowID
     let minimized: Bool
     let icon: NSImage
-    var windowless = false      // appen kjører, men har ingen vinduer
-    var badge: String? = nil    // varselmerke fra Dock (f.eks. «7»)
+    var windowless = false      // the app runs but has no windows
+    var badge: String? = nil    // notification badge from the Dock (e.g. "7")
 }
 
-/// Innstillinger (lagres i UserDefaults, begge er på som standard).
+/// Settings (stored in UserDefaults, both on by default).
 enum Settings {
     static func flag(_ key: String) -> Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
     static func set(_ key: String, _ v: Bool) { UserDefaults.standard.set(v, forKey: key) }
@@ -113,7 +113,7 @@ enum Settings {
     }
 }
 
-/// Apper, sist aktivert først (for rekkefølgen på apper uten vinduer).
+/// Apps, most recently activated first (orders the windowless apps).
 var appMRU: [pid_t] = []
 
 func noteActivated(_ app: NSRunningApplication?) {
@@ -122,7 +122,7 @@ func noteActivated(_ app: NSRunningApplication?) {
     appMRU.insert(pid, at: 0)
 }
 
-/// Leser varselmerkene (røde tall) fra Dock-ikonene, nøklet på app-stien.
+/// Reads the notification badges (red numbers) from the Dock icons, keyed by app path.
 func dockBadges() -> [String: String] {
     guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first
     else { return [:] }
@@ -145,9 +145,9 @@ func normalizedPath(_ url: URL) -> String {
     return p
 }
 
-/// Vinduer på andre Spaces, oppdatert i bakgrunnen (brute force er for tregt å gjøre ved hvert Cmd+Tab).
+/// Windows on other Spaces, refreshed in the background (brute force is too slow for every Cmd+Tab).
 final class WindowCache {
-    private let queue = DispatchQueue(label: "vindusbytter.cache", qos: .utility)
+    private let queue = DispatchQueue(label: "deck.cache", qos: .utility)
     private var running = false
     private var again = false
     private(set) var byPid: [pid_t: [AXUIElement]] = [:]
@@ -179,7 +179,7 @@ final class WindowCache {
 
 let cache = WindowCache()
 
-/// Sist brukte vinduer, nyeste først.
+/// Most recently used windows, newest first.
 var mru: [CGWindowID] = []
 
 func onScreenZOrder() -> [CGWindowID] {
@@ -192,7 +192,7 @@ func onScreenZOrder() -> [CGWindowID] {
     }
 }
 
-/// Vinduene som er synlige nå er de sist brukte; flytt dem først i MRU-lista.
+/// The windows visible right now are the most recent ones; move them to the front of the MRU list.
 func noteVisibleWindows() {
     let visible = onScreenZOrder()
     let set = Set(visible)
@@ -237,22 +237,22 @@ func collectWindows() -> [WinItem] {
                                  wid: wid, minimized: minimized, icon: icon))
         }
 
-        // Raskt: vinduer på gjeldende Space (og minimerte).
+        // Fast path: windows on the current Space (and minimized ones).
         let axApp = AXUIElementCreateApplication(pid)
         if let wins = axAttr(axApp, kAXWindowsAttribute) as? [AXUIElement] {
             for w in wins where isRealWindow(w) { add(w, checkExists: false) }
         }
-        // Fra bakgrunnscachen: vinduer på andre Spaces.
+        // From the background cache: windows on other Spaces.
         for w in cache.byPid[pid] ?? [] { add(w, checkExists: true) }
 
-        // Apper som kjører uten vinduer kommer med sist, som i AltTab.
+        // Apps running without windows go last, like in AltTab.
         if Settings.showWindowless && !items.contains(where: { $0.app.processIdentifier == pid }) {
             items.append(WinItem(app: app, element: axApp, title: appName, wid: 0,
                                  minimized: false, icon: icon, windowless: true))
         }
     }
 
-    // Varselmerker fra Dock.
+    // Notification badges from the Dock.
     let badges = Settings.showBadges ? dockBadges() : [:]
     if !badges.isEmpty {
         for i in items.indices {
@@ -265,7 +265,7 @@ func collectWindows() -> [WinItem] {
     var appRank: [pid_t: Int] = [:]
     for (i, pid) in appMRU.enumerated() where appRank[pid] == nil { appRank[pid] = i }
 
-    // Vanlige vinduer først, så minimerte, så apper uten vinduer – hver gruppe etter sist brukt.
+    // Regular windows first, then minimized, then windowless apps – each group by recency.
     func group(_ it: WinItem) -> Int { it.windowless ? 2 : (it.minimized ? 1 : 0) }
     return items.enumerated().sorted { a, b in
         let ga = group(a.element), gb = group(b.element)
@@ -280,7 +280,7 @@ func collectWindows() -> [WinItem] {
     }.map { $0.element }
 }
 
-/// Gjør vinduet til hovedvindu (fungerer også når det ligger på et annet Space).
+/// Makes the window key (also works when it is on another Space).
 func makeKeyWindow(_ psn: inout ProcessSerialNumber, _ wid: CGWindowID) {
     guard let post = postEventRecord else { return }
     var bytes = [UInt8](repeating: 0, count: 0xf8)
@@ -297,7 +297,7 @@ func makeKeyWindow(_ psn: inout ProcessSerialNumber, _ wid: CGWindowID) {
 func focus(_ item: WinItem) {
     if item.app.isHidden { item.app.unhide() }
     if item.windowless {
-        // Bare aktiver appen (som macOS' egen Cmd+Tab), uten å lage nytt vindu.
+        // Just activate the app (like the system Cmd+Tab) without opening a new window.
         var psn = ProcessSerialNumber()
         if let getPSN = getProcessForPID, let setFront = setFrontProcess,
            getPSN(item.app.processIdentifier, &psn) == noErr {
@@ -331,20 +331,20 @@ func focus(_ item: WinItem) {
 
 // MARK: - UI
 
-// Mål tatt fra macOS 26 sin egen Cmd+Tab.
+// Measurements taken from the macOS 26 Cmd+Tab switcher.
 enum Layout {
-    static let icon: CGFloat = 128         // tegneflate for ikonet (inkl. ikonets innebygde marg)
-    static let iconInset: CGFloat = 13     // macOS-ikoner har ~10 % luft rundt selve motivet
-    static let itemW: CGFloat = 134        // én celle
+    static let icon: CGFloat = 128         // icon drawing size (includes the icon's built-in margin)
+    static let iconInset: CGFloat = 13     // macOS icons have ~10% padding around the artwork
+    static let itemW: CGFloat = 134        // one cell
     static let iconTop: CGFloat = 0
-    static let labelGap: CGFloat = 12      // fra ikonmotivet ned til tittelen
-    static let labelH: CGFloat = 15        // tittel under valgt ikon
+    static let labelGap: CGFloat = 12      // from the icon artwork down to the title
+    static let labelH: CGFloat = 15        // title under the selected icon
     static let itemH: CGFloat = iconTop + icon - iconInset + labelGap + labelH
-    static let pad: CGFloat = 24           // marg til venstre/høyre
-    static let padTop: CGFloat = 28        // gir ~41 pt luft over ikonmotivet
+    static let pad: CGFloat = 24           // left/right padding
+    static let padTop: CGFloat = 28        // ~41 pt above the icon artwork
     static let padBottom: CGFloat = 14
-    static let corner: CGFloat = 64        // panelets hjørneradius
-    static let highlightPad: CGFloat = 8  // markeringen går så langt utenfor ikonmotivet
+    static let corner: CGFloat = 64        // panel corner radius
+    static let highlightPad: CGFloat = 8  // how far the highlight extends past the artwork
     static let highlightCorner: CGFloat = 32
 }
 
@@ -375,7 +375,7 @@ final class GridView: NSView {
 
     func rect(for i: Int) -> NSRect {
         let r = i / cols, c = i % cols
-        // Siste rad kan ha færre ikoner – sentrer dem.
+        // The last row may have fewer icons – center them.
         let inRow = min(cols, items.count - r * cols)
         let offset = CGFloat(cols - inRow) * Layout.itemW / 2
         return NSRect(x: Layout.pad + offset + CGFloat(c) * Layout.itemW,
@@ -394,17 +394,17 @@ final class GridView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        // Som macOS' egen Cmd+Tab: bare ikoner, avrundet markering rundt valgt,
-        // og tittelen vises kun under det valgte.
+        // Like the system Cmd+Tab: icons only, a rounded highlight behind the selected one,
+        // and the title only under the selected item.
 
-        // Lys glasskant: sterkest øverst, svakere nederst.
+        // Bright glass rim: strongest at the top, fainter at the bottom.
         let rim = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
                                xRadius: Layout.corner - 0.5, yRadius: Layout.corner - 0.5)
         if let g = NSGradient(colors: [NSColor.white.withAlphaComponent(0.55),
                                        NSColor.white.withAlphaComponent(0.12),
                                        NSColor.white.withAlphaComponent(0.30)]),
            let ctx = NSGraphicsContext.current?.cgContext {
-            // Tegn kanten som gradient ved å klippe til selve streken (flippet view: 90° = ovenfra og ned).
+            // Draw the rim as a gradient by clipping to the stroke (flipped view: 90° = top to bottom).
             ctx.saveGState()
             ctx.addPath(rim.cgPath)
             ctx.setLineWidth(1.2)
@@ -431,14 +431,14 @@ final class GridView: NSView {
                          fraction: it.minimized ? 0.45 : 1, respectFlipped: true, hints: nil)
             let visible = ir.insetBy(dx: Layout.iconInset, dy: Layout.iconInset)
 
-            // Prikk under ikonet på apper som kjører uten vinduer (som i Dock).
+            // Dot under the icon for apps running without windows (like the Dock).
             if it.windowless {
                 let y = visible.maxY + 3
                 NSColor.labelColor.withAlphaComponent(0.75).setFill()
                 NSBezierPath(ovalIn: NSRect(x: visible.midX - 2, y: y, width: 4, height: 4)).fill()
             }
 
-            // Rødt varselmerke øverst til høyre, som i macOS.
+            // Red notification badge in the top right corner, like macOS.
             if let badge = it.badge { drawBadge(badge, iconRect: visible) }
         }
 
@@ -453,7 +453,7 @@ final class GridView: NSView {
         ]
         let title = items[selected].title as NSString
         let ir = iconRect(for: selected)
-        // Teksten holder seg innenfor bredden på markeringen og kuttes med «…».
+        // The title stays within the highlight width and is truncated with "…".
         let maxW = Layout.icon - 2 * (Layout.iconInset - Layout.highlightPad)
         let textW = min(title.size(withAttributes: attrs).width + 2, maxW)
         let x = ir.midX - textW / 2
@@ -463,7 +463,7 @@ final class GridView: NSView {
     }
 
     func drawBadge(_ text: String, iconRect r: NSRect) {
-        // Mål fra macOS 26: ~46 pt rund prikk, sentrert 13 pt inn og 12 pt ned fra hjørnet.
+        // Measured from macOS 26: ~46 pt circle, centered 13 pt in and 12 pt down from the corner.
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 25, weight: .regular),
             .foregroundColor: NSColor.white,
@@ -473,7 +473,7 @@ final class GridView: NSView {
         let h: CGFloat = 46
         let w = max(h, ts.width + 22)
         let center = NSPoint(x: r.maxX - 13, y: r.minY + 12)
-        // Brede merker (f.eks. «128») vokser mot venstre fra høyrekanten.
+        // Wide badges (e.g. "128") grow leftwards from the right edge.
         let rect = NSRect(x: center.x + h / 2 - w, y: center.y - h / 2, width: w, height: h)
         NSColor.systemRed.setFill()
         NSBezierPath(roundedRect: rect, xRadius: h / 2, yRadius: h / 2).fill()
@@ -508,7 +508,7 @@ func roundedMask(_ r: CGFloat) -> NSImage {
     return img
 }
 
-// MARK: - Bytteren
+// MARK: - Switcher
 
 final class Switcher {
     var tap: CFMachPort?
@@ -524,14 +524,14 @@ final class Switcher {
     init() {
         grid.autoresizingMask = [.width, .height]
         if #available(macOS 26, *) {
-            // Liquid Glass, som systemets egen Cmd+Tab i macOS 26.
+            // Liquid Glass, like the system Cmd+Tab on macOS 26.
             let glass = NSGlassEffectView()
             glass.style = .clear
-            glass.tintColor = NSColor.white.withAlphaComponent(0.10) // litt lysere, som systemets
+            glass.tintColor = NSColor.white.withAlphaComponent(0.10) // slightly lighter, like the system's
             glass.cornerRadius = Layout.corner
             glass.contentView = grid
             panel.contentView = glass
-            panel.hasShadow = false // glasset tegner sin egen kant og skygge
+            panel.hasShadow = false // the glass draws its own edge and shadow
         } else {
             let blur = NSVisualEffectView()
             blur.material = .hudWindow
@@ -560,7 +560,7 @@ final class Switcher {
         return true
     }
 
-    /// Returnerer true hvis hendelsen skal svelges.
+    /// Returns true if the event should be swallowed.
     func handle(type: CGEventType, event: CGEvent) -> Bool {
         let flags = event.flags
         let key = event.getIntegerValueField(.keyboardEventKeycode)
@@ -587,7 +587,7 @@ final class Switcher {
             case 13 where !isRepeat: closeSelectedWindow() // W
             default: break
             }
-            return true // svelg alle taster mens bytteren er åpen
+            return true // swallow all keys while the switcher is open
         case .keyUp:
             if key == 48 && swallowTabUp { swallowTabUp = false; return true }
             return active
@@ -601,13 +601,13 @@ final class Switcher {
 
     func begin(backwards: Bool) {
         items = collectWindows()
-        cache.refresh() // hold cachen fersk til neste gang
+        cache.refresh() // keep the cache fresh for next time
         guard !items.isEmpty else { return }
         active = true
         selected = items.count > 1 ? (backwards ? items.count - 1 : 1) : 0
         let work = DispatchWorkItem { [weak self] in self?.showPanel() }
         pendingShow = work
-        // Liten forsinkelse som i macOS: raskt Cmd+Tab bytter uten å vise panelet.
+        // Short delay like macOS: a quick Cmd+Tab switches without showing the panel.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
     }
 
@@ -644,12 +644,12 @@ final class Switcher {
         panel.setFrame(frame, display: false)
         grid.frame = NSRect(origin: .zero, size: size)
         grid.needsDisplay = true
-        fadeGeneration += 1 // avbryt en eventuell fade-out som pågår
+        fadeGeneration += 1 // cancel any fade-out in progress
         panel.alphaValue = 1
         panel.orderFrontRegardless()
     }
 
-    /// Etter Cmd+Q / Cmd+W: oppdater panelet, eller lukk det hvis lista er tom.
+    /// After Cmd+Q / Cmd+W: update the panel, or close it if the list is empty.
     func itemsChanged() {
         if items.isEmpty { close(); return }
         selected = min(selected, items.count - 1)
@@ -679,8 +679,8 @@ final class Switcher {
         pendingShow?.cancel()
         pendingShow = nil
         guard panel.isVisible else { return }
-        // Kort, subtil fade-out som i macOS. Generasjonsteller hindrer at en gammel
-        // fade skjuler panelet hvis Cmd+Tab trykkes på nytt mens den pågår.
+        // Short, subtle fade-out like macOS. The generation counter stops an old fade
+        // from hiding the panel if Cmd+Tab is pressed again while it runs.
         fadeGeneration += 1
         let gen = fadeGeneration
         NSAnimationContext.runAnimationGroup({ ctx in
@@ -718,8 +718,8 @@ let tapCallback: CGEventTapCallBack = { _, type, event, _ in
 
 // MARK: - App
 
-/// Menylinje-ikon: to stablede vinduer, det fremste fylt. Template-bilde,
-/// så macOS farger det hvitt eller mørkt etter menylinja.
+/// Menu bar icon: two stacked windows, the front one filled. A template image,
+/// so macOS tints it white or dark to match the menu bar.
 func menuBarIcon() -> NSImage {
     let img = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { _ in
         NSColor.black.set()
@@ -729,7 +729,7 @@ func menuBarIcon() -> NSImage {
         back.stroke()
         let front = NSBezierPath(roundedRect: NSRect(x: 5.2, y: 6.2, width: 11, height: 9.3),
                                  xRadius: 2.4, yRadius: 2.4)
-        // Litt luft rundt det fremste vinduet, så kantene ikke flyter sammen.
+        // A small gap around the front window so the outlines don't merge.
         NSGraphicsContext.current?.compositingOperation = .clear
         let gap = NSBezierPath(roundedRect: NSRect(x: 4.2, y: 5.2, width: 13, height: 11.3),
                                xRadius: 3.2, yRadius: 3.2)
@@ -739,16 +739,16 @@ func menuBarIcon() -> NSImage {
         return true
     }
     img.isTemplate = true
-    img.accessibilityDescription = "Vindusbytter"
+    img.accessibilityDescription = "Deck"
     return img
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var statusItem: NSStatusItem!
-    let statusLine = NSMenuItem(title: "Venter på tilgang …", action: nil, keyEquivalent: "")
-    let loginItem = NSMenuItem(title: "Start ved innlogging", action: #selector(toggleLogin), keyEquivalent: "")
-    let windowlessItem = NSMenuItem(title: "Vis apper uten vinduer", action: #selector(toggleWindowless), keyEquivalent: "")
-    let badgesItem = NSMenuItem(title: "Vis varselmerker", action: #selector(toggleBadges), keyEquivalent: "")
+    let statusLine = NSMenuItem(title: "Waiting for Accessibility access…", action: nil, keyEquivalent: "")
+    let loginItem = NSMenuItem(title: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
+    let windowlessItem = NSMenuItem(title: "Show Apps Without Windows", action: #selector(toggleWindowless), keyEquivalent: "")
+    let badgesItem = NSMenuItem(title: "Show Notification Badges", action: #selector(toggleBadges), keyEquivalent: "")
     var retryTimer: Timer?
     var cacheTimer: Timer?
 
@@ -767,10 +767,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         loginItem.target = self
         menu.addItem(loginItem)
-        menu.addItem(withTitle: "Åpne Tilgjengelighet-innstillinger …",
+        menu.addItem(withTitle: "Open Accessibility Settings…",
                      action: #selector(openAccessibility), keyEquivalent: "").target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Avslutt Vindusbytter",
+        menu.addItem(withTitle: "Quit Deck",
                      action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem.menu = menu
 
@@ -785,7 +785,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func tryStart() {
         if AXIsProcessTrusted() && switcher.startTap() {
             setNativeCommandTab(enabled: false)
-            statusLine.title = "Aktiv – Cmd+Tab bytter vindu"
+            statusLine.title = "Active – Cmd+Tab switches windows"
             retryTimer?.invalidate()
             retryTimer = nil
             startWatching()
@@ -796,7 +796,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Følg med på app- og Space-bytter for MRU-rekkefølgen og vindus-cachen.
+    /// Watch app and Space changes for the MRU order and the window cache.
     func startWatching() {
         let nc = NSWorkspace.shared.notificationCenter
         nc.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { note in
@@ -815,7 +815,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         cache.refresh()
     }
 
-    // MARK: Start ved innlogging
+    // MARK: Open at login
 
     func setUpLoginItemFirstTime() {
         let key = "loginItemSetUp"
@@ -829,7 +829,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             if svc.status == .enabled { try svc.unregister() } else { try svc.register() }
         } catch {
-            NSLog("Vindusbytter: innloggingsobjekt feilet: \(error)")
+            NSLog("Deck: login item failed: \(error)")
         }
         if svc.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
     }
@@ -843,13 +843,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch SMAppService.mainApp.status {
         case .enabled:
             loginItem.state = .on
-            loginItem.title = "Start ved innlogging"
+            loginItem.title = "Open at Login"
         case .requiresApproval:
             loginItem.state = .mixed
-            loginItem.title = "Start ved innlogging (må godkjennes i Innstillinger)"
+            loginItem.title = "Open at Login (approve in System Settings)"
         default:
             loginItem.state = .off
-            loginItem.title = "Start ved innlogging"
+            loginItem.title = "Open at Login"
         }
     }
 
@@ -862,7 +862,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 }
 
-// `Vindusbytter --preview` viser panelet med kjørende apper i 8 sekunder (for å se på utseendet).
+// `Deck --preview` shows the panel with running apps for 8 seconds (to check the look).
 if CommandLine.arguments.contains("--preview") {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
@@ -875,7 +875,7 @@ if CommandLine.arguments.contains("--preview") {
     for i in switcher.items.indices {
         if let url = switcher.items[i].app.bundleURL { switcher.items[i].badge = badges[normalizedPath(url)] }
     }
-    if let last = switcher.items.indices.last { switcher.items[last].windowless = true } // vis prikken
+    if let last = switcher.items.indices.last { switcher.items[last].windowless = true } // show the dot
     switcher.active = true
     switcher.selected = min(1, max(0, switcher.items.count - 1))
     DispatchQueue.main.async { switcher.showPanel() }
@@ -883,10 +883,10 @@ if CommandLine.arguments.contains("--preview") {
     app.run()
 }
 
-// `Vindusbytter --restore` slår på macOS' egen Cmd+Tab igjen og avslutter (nødbrems).
+// `Deck --restore` turns the system Cmd+Tab back on and exits (emergency brake).
 if CommandLine.arguments.contains("--restore") {
     setNativeCommandTab(enabled: true)
-    print("macOS' egen Cmd+Tab er slått på igjen.")
+    print("The system Cmd+Tab is turned back on.")
     exit(0)
 }
 

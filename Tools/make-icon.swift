@@ -1,5 +1,5 @@
-// Tegner app-ikonet og lager Resources/AppIcon.icns.
-// Kjør: swift Tools/make-icon.swift
+// Draws the app icon and builds Resources/AppIcon.icns.
+// Run: swift Tools/make-icon.swift
 import AppKit
 
 let size: CGFloat = 1024
@@ -10,11 +10,11 @@ try fm.createDirectory(at: iconset, withIntermediateDirectories: true)
 try fm.createDirectory(at: URL(fileURLWithPath: "Resources"), withIntermediateDirectories: true)
 
 func drawIcon(_ ctx: CGContext) {
-    // macOS-ikonmal: 824×824-flate midt i 1024-lerretet.
+    // macOS icon template: 824×824 body centered on a 1024 canvas.
     let body = CGRect(x: 100, y: 100, width: 824, height: 824)
     let shape = CGPath(roundedRect: body, cornerWidth: 185, cornerHeight: 185, transform: nil)
 
-    // Skygge under ikonet
+    // Shadow under the icon
     ctx.saveGState()
     ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 28,
                   color: CGColor(gray: 0, alpha: 0.35))
@@ -23,7 +23,7 @@ func drawIcon(_ ctx: CGContext) {
     ctx.fillPath()
     ctx.restoreGState()
 
-    // Bakgrunn: blå → indigo
+    // Background: blue → indigo
     ctx.saveGState()
     ctx.addPath(shape)
     ctx.clip()
@@ -32,7 +32,7 @@ func drawIcon(_ ctx: CGContext) {
         CGColor(red: 0.36, green: 0.29, blue: 0.93, alpha: 1),
     ] as CFArray, locations: [0, 1])!
     ctx.drawLinearGradient(bg, start: CGPoint(x: 200, y: 924), end: CGPoint(x: 824, y: 100), options: [])
-    // Glans øverst
+    // Shine at the top
     let shine = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [
         CGColor(gray: 1, alpha: 0.28), CGColor(gray: 1, alpha: 0),
     ] as CFArray, locations: [0, 1])!
@@ -47,7 +47,7 @@ func drawIcon(_ ctx: CGContext) {
         ctx.setFillColor(fill)
         ctx.fillPath()
         ctx.restoreGState()
-        // Tittellinje
+        // Title bar
         ctx.saveGState()
         ctx.addPath(p)
         ctx.clip()
@@ -64,13 +64,13 @@ func drawIcon(_ ctx: CGContext) {
         }
     }
 
-    // Bakre vindu (halvgjennomsiktig) og fremre vindu
+    // Back window (translucent) and front window
     window(CGRect(x: 210, y: 400, width: 470, height: 360),
            fill: CGColor(gray: 1, alpha: 0.38), bar: CGColor(gray: 1, alpha: 0.25), dots: false)
     window(CGRect(x: 344, y: 250, width: 470, height: 360),
            fill: CGColor(gray: 1, alpha: 0.97), bar: CGColor(red: 0.90, green: 0.92, blue: 0.97, alpha: 1), dots: true)
 
-    // Bytte-pil i det fremre vinduet
+    // Switch arrow in the front window
     ctx.setStrokeColor(CGColor(red: 0.36, green: 0.36, blue: 0.93, alpha: 1))
     ctx.setLineWidth(34)
     ctx.setLineCap(.round)
@@ -105,4 +105,4 @@ p.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
 p.arguments = ["-c", "icns", iconset.path, "-o", "Resources/AppIcon.icns"]
 try p.run()
 p.waitUntilExit()
-print(p.terminationStatus == 0 ? "Laget Resources/AppIcon.icns" : "iconutil feilet")
+print(p.terminationStatus == 0 ? "Created Resources/AppIcon.icns" : "iconutil failed")

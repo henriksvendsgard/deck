@@ -1,23 +1,39 @@
 #!/bin/zsh
-# Bygger Vindusbytter.app til build/.
-# ./build.sh install  – bygger, installerer i /Applications og starter appen.
+# Builds Deck.app into build/.
+#   ./build.sh           build only
+#   ./build.sh install   build, install to /Applications and launch
+#   ./build.sh release   build and zip to build/Deck.zip (for GitHub Releases)
 set -e
 cd "$(dirname "$0")"
-APP=build/Vindusbytter.app
+APP=build/Deck.app
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Info.plist "$APP/Contents/Info.plist"
-mkdir -p "$APP/Contents/Resources"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/"
-swiftc -O -swift-version 5 -target arm64-apple-macos14 \
-  Sources/main.swift -o "$APP/Contents/MacOS/Vindusbytter"
+# Universal binary: Apple Silicon + Intel.
+for arch in arm64 x86_64; do
+  swiftc -O -swift-version 5 -target $arch-apple-macos14 \
+    Sources/main.swift -o build/Deck-$arch
+done
+lipo -create build/Deck-arm64 build/Deck-x86_64 -output "$APP/Contents/MacOS/Deck"
+rm build/Deck-arm64 build/Deck-x86_64
 codesign --force --sign - "$APP"
-echo "Bygget: $APP"
+echo "Built: $APP"
 
-if [[ "$1" == "install" ]]; then
-  pkill -TERM -x Vindusbytter 2>/dev/null && sleep 1 || true
-  rm -rf /Applications/Vindusbytter.app
-  cp -R "$APP" /Applications/
-  open /Applications/Vindusbytter.app
-  echo "Installert: /Applications/Vindusbytter.app"
-fi
+case "$1" in
+  install)
+    pkill -TERM -x Deck 2>/dev/null && sleep 1 || true
+    # One-time cleanup of the old name.
+    pkill -TERM -x Vindusbytter 2>/dev/null && sleep 1 || true
+    rm -rf /Applications/Vindusbytter.app
+    rm -rf /Applications/Deck.app
+    cp -R "$APP" /Applications/
+    open /Applications/Deck.app
+    echo "Installed: /Applications/Deck.app"
+    ;;
+  release)
+    rm -f build/Deck.zip
+    ditto -c -k --keepParent "$APP" build/Deck.zip
+    echo "Zipped: build/Deck.zip"
+    ;;
+esac
