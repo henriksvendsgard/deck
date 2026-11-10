@@ -97,6 +97,40 @@ struct WinItem {
     let wid: CGWindowID
     let minimized: Bool
     let icon: NSImage
+    var windowless = false      // appen kjører, men har ingen vinduer
+    var badge: String? = nil    // varselmerke fra Dock (f.eks. «7»)
+}
+
+/// Apper, sist aktivert først (for rekkefølgen på apper uten vinduer).
+var appMRU: [pid_t] = []
+
+func noteActivated(_ app: NSRunningApplication?) {
+    guard let pid = app?.processIdentifier else { return }
+    appMRU.removeAll { $0 == pid }
+    appMRU.insert(pid, at: 0)
+}
+
+/// Leser varselmerkene (røde tall) fra Dock-ikonene, nøklet på app-stien.
+func dockBadges() -> [String: String] {
+    guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first
+    else { return [:] }
+    let axDock = AXUIElementCreateApplication(dock.processIdentifier)
+    guard let children = axAttr(axDock, kAXChildrenAttribute) as? [AXUIElement] else { return [:] }
+    var result: [String: String] = [:]
+    for list in children where (axAttr(list, kAXRoleAttribute) as? String) == kAXListRole {
+        for item in (axAttr(list, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
+            guard let label = axAttr(item, "AXStatusLabel") as? String, !label.isEmpty,
+                  let url = axAttr(item, kAXURLAttribute) as? URL else { continue }
+            result[normalizedPath(url)] = label
+        }
+    }
+    return result
+}
+
+func normalizedPath(_ url: URL) -> String {
+    var p = url.standardizedFileURL.resolvingSymlinksInPath().path
+    while p.count > 1 && p.hasSuffix("/") { p.removeLast() }
+    return p
 }
 
 /// Vinduer på andre Spaces, oppdatert i bakgrunnen (brute force er for tregt å gjøre ved hvert Cmd+Tab).
@@ -198,15 +232,37 @@ func collectWindows() -> [WinItem] {
         }
         // Fra bakgrunnscachen: vinduer på andre Spaces.
         for w in cache.byPid[pid] ?? [] { add(w, checkExists: true) }
+
+        // Apper som kjører uten vinduer kommer med sist, som i AltTab.
+        if !items.contains(where: { $0.app.processIdentifier == pid }) {
+            items.append(WinItem(app: app, element: axApp, title: appName, wid: 0,
+                                 minimized: false, icon: icon, windowless: true))
+        }
+    }
+
+    // Varselmerker fra Dock.
+    let badges = dockBadges()
+    if !badges.isEmpty {
+        for i in items.indices {
+            if let url = items[i].app.bundleURL { items[i].badge = badges[normalizedPath(url)] }
+        }
     }
 
     var rank: [CGWindowID: Int] = [:]
     for (i, wid) in mru.enumerated() where rank[wid] == nil { rank[wid] = i }
+    var appRank: [pid_t: Int] = [:]
+    for (i, pid) in appMRU.enumerated() where appRank[pid] == nil { appRank[pid] = i }
 
-    // Ikke-minimerte først, så etter sist brukt.
+    // Vanlige vinduer først, så minimerte, så apper uten vinduer – hver gruppe etter sist brukt.
+    func group(_ it: WinItem) -> Int { it.windowless ? 2 : (it.minimized ? 1 : 0) }
     return items.enumerated().sorted { a, b in
-        let ma = a.element.minimized ? 1 : 0, mb = b.element.minimized ? 1 : 0
-        if ma != mb { return ma < mb }
+        let ga = group(a.element), gb = group(b.element)
+        if ga != gb { return ga < gb }
+        if ga == 2 {
+            let ra = appRank[a.element.app.processIdentifier] ?? Int.max
+            let rb = appRank[b.element.app.processIdentifier] ?? Int.max
+            return ra != rb ? ra < rb : a.offset < b.offset
+        }
         let ra = rank[a.element.wid] ?? Int.max, rb = rank[b.element.wid] ?? Int.max
         return ra != rb ? ra < rb : a.offset < b.offset
     }.map { $0.element }
@@ -228,6 +284,17 @@ func makeKeyWindow(_ psn: inout ProcessSerialNumber, _ wid: CGWindowID) {
 
 func focus(_ item: WinItem) {
     if item.app.isHidden { item.app.unhide() }
+    if item.windowless {
+        // Bare aktiver appen (som macOS' egen Cmd+Tab), uten å lage nytt vindu.
+        var psn = ProcessSerialNumber()
+        if let getPSN = getProcessForPID, let setFront = setFrontProcess,
+           getPSN(item.app.processIdentifier, &psn) == noErr {
+            _ = setFront(&psn, 0, 0x400) // kCPSNoWindows
+        }
+        if #available(macOS 14, *) { item.app.activate() } else { item.app.activate(options: []) }
+        noteActivated(item.app)
+        return
+    }
     if item.minimized {
         AXUIElementSetAttributeValue(item.element, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
     }
@@ -350,6 +417,16 @@ final class GridView: NSView {
             }
             it.icon.draw(in: ir, from: .zero, operation: .sourceOver,
                          fraction: it.minimized ? 0.45 : 1, respectFlipped: true, hints: nil)
+            let visible = ir.insetBy(dx: Layout.iconInset, dy: Layout.iconInset)
+
+            // Prikk under apper som kjører uten vinduer (som i Dock).
+            if it.windowless {
+                NSColor.labelColor.withAlphaComponent(0.75).setFill()
+                NSBezierPath(ovalIn: NSRect(x: visible.midX - 2, y: visible.maxY + 3, width: 4, height: 4)).fill()
+            }
+
+            // Rødt varselmerke øverst til høyre, som i macOS.
+            if let badge = it.badge { drawBadge(badge, iconRect: visible) }
         }
 
         guard items.indices.contains(selected) else { return }
@@ -370,6 +447,22 @@ final class GridView: NSView {
         title.draw(with: NSRect(x: x, y: ir.maxY - Layout.iconInset + Layout.labelGap,
                                 width: textW, height: Layout.labelH),
                    options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attrs)
+    }
+
+    func drawBadge(_ text: String, iconRect r: NSRect) {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 16, weight: .medium),
+            .foregroundColor: NSColor.white,
+        ]
+        let str = text as NSString
+        let ts = str.size(withAttributes: attrs)
+        let h: CGFloat = 28
+        let w = max(h, ts.width + 16)
+        let center = NSPoint(x: r.maxX - 12, y: r.minY + 12)
+        let rect = NSRect(x: min(center.x - w / 2, r.maxX + 8 - w), y: center.y - h / 2, width: w, height: h)
+        NSColor.systemRed.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: h / 2, yRadius: h / 2).fill()
+        str.draw(at: NSPoint(x: rect.midX - ts.width / 2, y: rect.midY - ts.height / 2), withAttributes: attrs)
     }
 
     override func updateTrackingAreas() {
@@ -547,7 +640,7 @@ final class Switcher {
     }
 
     func closeSelectedWindow() {
-        guard items.indices.contains(selected) else { return }
+        guard items.indices.contains(selected), !items[selected].windowless else { return }
         let it = items[selected]
         if let btn = axAttr(it.element, kAXCloseButtonAttribute) {
             AXUIElementPerformAction(btn as! AXUIElement, kAXPressAction as CFString)
@@ -667,7 +760,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Følg med på app- og Space-bytter for MRU-rekkefølgen og vindus-cachen.
     func startWatching() {
         let nc = NSWorkspace.shared.notificationCenter
-        nc.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { _ in
+        nc.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { note in
+            noteActivated(note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { noteVisibleWindows() }
         }
         for name in [NSWorkspace.activeSpaceDidChangeNotification,
@@ -733,6 +827,11 @@ if CommandLine.arguments.contains("--preview") {
         WinItem(app: $0, element: AXUIElementCreateApplication($0.processIdentifier),
                 title: $0.localizedName ?? "", wid: 0, minimized: false, icon: $0.icon ?? NSImage())
     }
+    let badges = dockBadges()
+    for i in switcher.items.indices {
+        if let url = switcher.items[i].app.bundleURL { switcher.items[i].badge = badges[normalizedPath(url)] }
+    }
+    if let last = switcher.items.indices.last { switcher.items[last].windowless = true } // vis prikken
     switcher.active = true
     switcher.selected = min(1, max(0, switcher.items.count - 1))
     DispatchQueue.main.async { switcher.showPanel() }
