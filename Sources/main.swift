@@ -266,7 +266,7 @@ enum Layout {
     static let padBottom: CGFloat = 8
     static let corner: CGFloat = 64        // panelets hjørneradius
     static let highlightPad: CGFloat = 7   // markeringen går så langt utenfor ikonmotivet
-    static let highlightCorner: CGFloat = 26
+    static let highlightCorner: CGFloat = 32
 }
 
 final class SwitcherPanel: NSPanel {
