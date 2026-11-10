@@ -342,7 +342,7 @@ final class GridView: NSView {
                                     dy: Layout.iconInset - Layout.highlightPad)
                 let path = NSBezierPath(roundedRect: hr, xRadius: Layout.highlightCorner,
                                         yRadius: Layout.highlightCorner)
-                NSColor.white.withAlphaComponent(0.20).setFill()
+                NSColor.white.withAlphaComponent(0.26).setFill()
                 path.fill()
                 NSColor.white.withAlphaComponent(0.35).setStroke()
                 path.lineWidth = 1
