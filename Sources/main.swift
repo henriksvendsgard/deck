@@ -261,9 +261,9 @@ enum Layout {
     static let labelGap: CGFloat = 12      // fra ikonmotivet ned til tittelen
     static let labelH: CGFloat = 15        // tittel under valgt ikon
     static let itemH: CGFloat = iconTop + icon - iconInset + labelGap + labelH
-    static let pad: CGFloat = 18           // marg til venstre/høyre
-    static let padTop: CGFloat = 23        // gir ~36 pt luft over ikonmotivet
-    static let padBottom: CGFloat = 8
+    static let pad: CGFloat = 24           // marg til venstre/høyre
+    static let padTop: CGFloat = 28        // gir ~41 pt luft over ikonmotivet
+    static let padBottom: CGFloat = 14
     static let corner: CGFloat = 64        // panelets hjørneradius
     static let highlightPad: CGFloat = 8  // markeringen går så langt utenfor ikonmotivet
     static let highlightCorner: CGFloat = 32
@@ -360,9 +360,10 @@ final class GridView: NSView {
         ]
         let title = items[selected].title as NSString
         let ir = iconRect(for: selected)
-        let textW = min(title.size(withAttributes: attrs).width + 4, bounds.width - 2 * Layout.pad)
-        var x = ir.midX - textW / 2
-        x = max(Layout.pad, min(x, bounds.width - Layout.pad - textW))
+        // Teksten holder seg innenfor bredden på markeringen og kuttes med «…».
+        let maxW = Layout.icon - 2 * (Layout.iconInset - Layout.highlightPad)
+        let textW = min(title.size(withAttributes: attrs).width + 2, maxW)
+        let x = ir.midX - textW / 2
         title.draw(with: NSRect(x: x, y: ir.maxY - Layout.iconInset + Layout.labelGap,
                                 width: textW, height: Layout.labelH),
                    options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attrs)
