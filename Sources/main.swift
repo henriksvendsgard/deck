@@ -437,7 +437,8 @@ final class GridView: NSView {
             if it.windowless {
                 let y = visible.maxY + 3
                 NSColor.labelColor.withAlphaComponent(0.75).setFill()
-                NSBezierPath(ovalIn: NSRect(x: visible.midX - 2, y: y, width: 4, height: 4)).fill()
+                NSBezierPath(roundedRect: NSRect(x: visible.midX - 4, y: y, width: 8, height: 4),
+                             xRadius: 2, yRadius: 2).fill()
             }
 
             // Red notification badge in the top right corner, like macOS.
