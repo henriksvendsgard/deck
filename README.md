@@ -14,6 +14,10 @@
   <a href="#build-from-source">Build from source</a>
 </p>
 
+<p align="center">
+  <img src="docs/screenshot.jpg" width="760" alt="Deck's switcher panel on macOS 26, showing one icon per window with a notification badge on Slack and the selected window's title under its icon">
+</p>
+
 - Takes over **Cmd+Tab**: one item per window, most recently used first
 - Windows on **all Spaces**, plus minimized and hidden ones
 - Optionally, apps running without windows go last with a small dot under them (off by default)
