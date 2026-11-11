@@ -29,13 +29,25 @@
 
 ## Install
 
+### With Homebrew
+
+```bash
+brew install --cask henriksvendsgard/tap/deck
+```
+
+Deck starts right away. Grant access when asked: **System Settings → Privacy & Security → Accessibility → Deck**. When the menu bar icon says **Active**, Cmd+Tab is yours.
+
+Update with `brew upgrade --cask deck`. Uninstall with `brew uninstall --cask deck`.
+
+### Manually
+
 1. Download `Deck.zip` from the [latest release](https://github.com/henriksvendsgard/deck/releases/latest), unzip it and move **Deck.app** to **Applications**.
 2. Open Deck. It is not notarized by Apple, so macOS blocks it the first time. Go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**.
    You can also remove the quarantine flag from Terminal instead:
    ```bash
    xattr -dr com.apple.quarantine /Applications/Deck.app
    ```
-3. Grant access when asked: **System Settings → Privacy & Security → Accessibility → Deck**. When the menu bar icon says **Active**, Cmd+Tab is yours.
+3. Grant Accessibility access as described above.
 
 Requires macOS 14 or later. Liquid Glass needs macOS 26. Older versions get a blurred panel instead.
 
@@ -74,6 +86,7 @@ cd deck
 - `./build.sh` builds `build/Deck.app` (universal: Apple Silicon and Intel)
 - `./build.sh install` also installs to `/Applications` and launches it
 - `./build.sh release` makes `build/Deck.zip` for GitHub Releases
+- `Tools/release.sh 1.2 "notes"` bumps the version, publishes the GitHub release and updates the Homebrew cask
 - `swift Tools/make-icon.swift` redraws the app icon
 - `Deck --preview` shows the panel with your running apps for 8 seconds, without taking over Cmd+Tab
 
