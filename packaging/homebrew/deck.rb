@@ -12,15 +12,15 @@ cask "deck" do
     strategy :github_latest
   end
 
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "Deck.app"
 
-  # Deck is not notarized. Remove the quarantine flag so macOS doesn't block it,
-  # then (re)start it so an install or upgrade takes effect right away.
-  postflight do
-    system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{appdir}/Deck.app"]
-    system_command "/usr/bin/open", args: ["#{appdir}/Deck.app"]
+  # Deck is not notarized. Remove the quarantine flag before the app is moved
+  # into place so macOS doesn't block it.
+  preflight_steps do
+    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "Deck.app"],
+                          chdir: ".", writable_paths: ["Deck.app"]
   end
 
   uninstall quit: "io.github.henriksvendsgard.Deck"
@@ -28,7 +28,7 @@ cask "deck" do
   zap trash: "~/Library/Preferences/io.github.henriksvendsgard.Deck.plist"
 
   caveats <<~EOS
-    Deck needs Accessibility access to take over Cmd+Tab:
+    Open Deck from Applications. It needs Accessibility access to take over Cmd+Tab:
       System Settings → Privacy & Security → Accessibility → Deck
 
     After an upgrade, remove the old Deck entry there and add the new one.

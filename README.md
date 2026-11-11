@@ -35,7 +35,7 @@
 brew install --cask henriksvendsgard/tap/deck
 ```
 
-Deck starts right away. Grant access when asked: **System Settings → Privacy & Security → Accessibility → Deck**. When the menu bar icon says **Active**, Cmd+Tab is yours.
+Open Deck from Applications and grant access when asked: **System Settings → Privacy & Security → Accessibility → Deck**. When the menu bar icon says **Active**, Cmd+Tab is yours.
 
 Update with `brew upgrade --cask deck`. Uninstall with `brew uninstall --cask deck`.
 
