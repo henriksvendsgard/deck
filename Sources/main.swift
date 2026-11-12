@@ -113,6 +113,58 @@ enum Settings {
     static var showBadges: Bool {
         get { flag("showBadges", default: true) } set { set("showBadges", newValue) }
     }
+    static var checkForUpdates: Bool {
+        get { flag("checkForUpdates", default: true) } set { set("checkForUpdates", newValue) }
+    }
+}
+
+// MARK: - Update check
+
+/// Asks GitHub for the latest release. Nothing is downloaded or installed automatically:
+/// Deck only tells you that a new version exists and how to get it.
+enum Updates {
+    static let repo = "henriksvendsgard/deck"
+    static var current: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+    }
+    /// Installed with `brew install --cask`?
+    static var viaHomebrew: Bool {
+        ["/opt/homebrew/Caskroom/deck", "/usr/local/Caskroom/deck"]
+            .contains { FileManager.default.fileExists(atPath: $0) }
+    }
+
+    struct Release { let version: String; let notes: String; let url: URL }
+
+    static func isNewer(_ a: String, than b: String) -> Bool {
+        let x = a.split(separator: ".").map { Int($0) ?? 0 }
+        let y = b.split(separator: ".").map { Int($0) ?? 0 }
+        for i in 0..<max(x.count, y.count) {
+            let l = i < x.count ? x[i] : 0, r = i < y.count ? y[i] : 0
+            if l != r { return l > r }
+        }
+        return false
+    }
+
+    static func fetchLatest(_ done: @escaping (Release?) -> Void) {
+        var req = URLRequest(url: URL(string: "https://api.github.com/repos/\(repo)/releases/latest")!)
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("Deck/\(current)", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 15
+        URLSession.shared.dataTask(with: req) { data, _, _ in
+            var release: Release?
+            if let data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let tag = json["tag_name"] as? String,
+               let page = (json["html_url"] as? String).flatMap(URL.init(string:)) {
+                // The release notes end where the generic install instructions begin.
+                let body = (json["body"] as? String ?? "")
+                    .components(separatedBy: "### Install").first?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                release = Release(version: tag.hasPrefix("v") ? String(tag.dropFirst()) : tag,
+                                  notes: body, url: page)
+            }
+            DispatchQueue.main.async { done(release) }
+        }.resume()
+    }
 }
 
 /// Apps, most recently activated first (orders the windowless apps).
@@ -371,11 +423,21 @@ final class GridView: NSView {
     var cols = 1
     var onHover: ((Int) -> Void)?
     var onClick: ((Int) -> Void)?
+    /// While a Cmd+Q / Cmd+W animation runs: where each item is drawn right now,
+    /// and the removed items, which shrink and fade out (progress 0 → 1).
+    var animatedRects: [NSRect]?
+    var ghosts: [(item: WinItem, cell: NSRect, progress: CGFloat)] = []
 
     override var isFlipped: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     func rect(for i: Int) -> NSRect {
+        if let a = animatedRects, a.indices.contains(i) { return a[i] }
+        return layoutRect(for: i)
+    }
+
+    /// The resting position of item i in the grid.
+    func layoutRect(for i: Int) -> NSRect {
         let r = i / cols, c = i % cols
         // The last row may have fewer icons – center them.
         let inRow = min(cols, items.count - r * cols)
@@ -389,8 +451,9 @@ final class GridView: NSView {
         items.indices.first { rect(for: $0).contains(p) }
     }
 
-    func iconRect(for i: Int) -> NSRect {
-        let r = rect(for: i)
+    func iconRect(for i: Int) -> NSRect { iconRect(inCell: rect(for: i)) }
+
+    func iconRect(inCell r: NSRect) -> NSRect {
         return NSRect(x: r.midX - Layout.icon / 2, y: r.minY + Layout.iconTop,
                       width: Layout.icon, height: Layout.icon)
     }
@@ -414,6 +477,16 @@ final class GridView: NSView {
             ctx.clip()
             g.draw(in: bounds, angle: 90)
             ctx.restoreGState()
+        }
+
+        for g in ghosts {
+            let ir = iconRect(inCell: g.cell)
+            let s = 1 - 0.35 * g.progress
+            let r = NSRect(x: ir.midX - ir.width * s / 2, y: ir.midY - ir.height * s / 2,
+                           width: ir.width * s, height: ir.height * s)
+            g.item.icon.draw(in: r, from: .zero, operation: .sourceOver,
+                             fraction: (1 - g.progress) * (g.item.minimized ? 0.45 : 1),
+                             respectFlipped: true, hints: nil)
         }
 
         for (i, it) in items.enumerated() {
@@ -633,30 +706,106 @@ final class Switcher {
         let mouse = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main
         else { return }
-        let vf = screen.visibleFrame
-        let maxCols = max(1, Int((vf.width * 0.9 - 2 * Layout.pad) / Layout.itemW))
-        let cols = min(items.count, maxCols)
-        let rows = (items.count + cols - 1) / cols
-        let size = NSSize(width: CGFloat(cols) * Layout.itemW + 2 * Layout.pad,
-                          height: CGFloat(rows) * Layout.itemH + Layout.padTop + Layout.padBottom)
-        let frame = NSRect(x: vf.midX - size.width / 2, y: vf.midY - size.height / 2,
-                           width: size.width, height: size.height)
+        finishRemoval()
+        let (frame, cols) = panelLayout(count: items.count, on: screen)
         grid.items = items
         grid.cols = cols
         grid.selected = selected
         panel.setFrame(frame, display: false)
-        grid.frame = NSRect(origin: .zero, size: size)
+        grid.frame = NSRect(origin: .zero, size: frame.size)
         grid.needsDisplay = true
         fadeGeneration += 1 // cancel any fade-out in progress
         panel.alphaValue = 1
         panel.orderFrontRegardless()
     }
 
-    /// After Cmd+Q / Cmd+W: update the panel, or close it if the list is empty.
-    func itemsChanged() {
+    /// Panel frame and column count for a number of items, centered on the screen.
+    func panelLayout(count: Int, on screen: NSScreen) -> (frame: NSRect, cols: Int) {
+        let vf = screen.visibleFrame
+        let maxCols = max(1, Int((vf.width * 0.9 - 2 * Layout.pad) / Layout.itemW))
+        let cols = max(1, min(count, maxCols))
+        let rows = (count + cols - 1) / cols
+        let size = NSSize(width: CGFloat(cols) * Layout.itemW + 2 * Layout.pad,
+                          height: CGFloat(rows) * Layout.itemH + Layout.padTop + Layout.padBottom)
+        let frame = NSRect(x: (vf.midX - size.width / 2).rounded(), y: (vf.midY - size.height / 2).rounded(),
+                           width: size.width, height: size.height)
+        return (frame, cols)
+    }
+
+    var removalTimer: Timer?
+    var removalTarget: NSRect?
+
+    /// After Cmd+Q / Cmd+W: the removed icons shrink and fade, then the rest slide
+    /// into place while the panel shrinks to fit. Closes the panel if nothing is left.
+    func remove(where gone: (WinItem) -> Bool) {
+        finishRemoval()
+        let old = items
+        let keep = old.indices.filter { !gone(old[$0]) }
+        guard keep.count < old.count else { return }
+        items = keep.map { old[$0] }
         if items.isEmpty { close(); return }
         selected = min(selected, items.count - 1)
-        showPanel()
+        guard panel.isVisible, let screen = panel.screen ?? NSScreen.main else { showPanel(); return }
+
+        // Work in screen coordinates so items keep their place while the panel moves.
+        func toScreen(_ r: NSRect, _ f: NSRect) -> NSRect {
+            NSRect(x: f.minX + r.minX, y: f.maxY - r.maxY, width: r.width, height: r.height)
+        }
+        func toLocal(_ r: NSRect, _ f: NSRect) -> NSRect {
+            NSRect(x: r.minX - f.minX, y: f.maxY - r.maxY, width: r.width, height: r.height)
+        }
+        func lerp(_ a: NSRect, _ b: NSRect, _ t: CGFloat) -> NSRect {
+            NSRect(x: a.minX + (b.minX - a.minX) * t, y: a.minY + (b.minY - a.minY) * t,
+                   width: a.width + (b.width - a.width) * t, height: a.height + (b.height - a.height) * t)
+        }
+
+        let from = panel.frame
+        let oldCells = old.indices.map { toScreen(grid.rect(for: $0), from) }
+        let (to, cols) = panelLayout(count: items.count, on: screen)
+        grid.items = items
+        grid.cols = cols
+        grid.selected = selected
+        let startCells = keep.map { oldCells[$0] }
+        let endCells = items.indices.map { toScreen(grid.layoutRect(for: $0), to) }
+        let ghostCells = old.indices.filter { !keep.contains($0) }.map { (old[$0], oldCells[$0]) }
+
+        let fadeDur = 0.14, moveDelay = 0.08, moveDur = 0.24
+        let start = CACurrentMediaTime()
+        removalTarget = to
+        let tick = { [weak self] in
+            guard let self else { return }
+            let t = CACurrentMediaTime() - start
+            let fade = CGFloat(min(1, t / fadeDur))
+            let m = CGFloat(max(0, min(1, (t - moveDelay) / moveDur)))
+            let move = m < 0.5 ? 4 * m * m * m : 1 - pow(-2 * m + 2, 3) / 2 // ease in-out
+            var f = lerp(from, to, move)
+            f = NSRect(x: f.minX.rounded(), y: f.minY.rounded(), width: f.width.rounded(), height: f.height.rounded())
+            if self.panel.frame != f { self.panel.setFrame(f, display: true) }
+            self.grid.frame = NSRect(origin: .zero, size: f.size)
+            self.grid.ghosts = ghostCells.map { ($0.0, toLocal($0.1, f), 1 - pow(1 - fade, 2)) }
+            self.grid.animatedRects = zip(startCells, endCells).map { toLocal(lerp($0, $1, move), f) }
+            self.grid.needsDisplay = true
+            if t >= moveDelay + moveDur { self.finishRemoval() }
+        }
+        let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { _ in tick() }
+        RunLoop.main.add(timer, forMode: .common)
+        removalTimer = timer
+        tick()
+    }
+
+    /// Ends a running Cmd+Q / Cmd+W animation at its final state.
+    func finishRemoval() {
+        guard let timer = removalTimer else { return }
+        timer.invalidate()
+        removalTimer = nil
+        grid.ghosts = []
+        grid.animatedRects = nil
+        if let to = removalTarget {
+            panel.setFrame(to, display: true)
+            grid.frame = NSRect(origin: .zero, size: to.size)
+        }
+        removalTarget = nil
+        grid.needsDisplay = true
     }
 
     func closeSelectedWindow() {
@@ -665,19 +814,18 @@ final class Switcher {
         if let btn = axAttr(it.element, kAXCloseButtonAttribute) {
             AXUIElementPerformAction(btn as! AXUIElement, kAXPressAction as CFString)
         }
-        items.remove(at: selected)
-        itemsChanged()
+        remove { CFEqual($0.element, it.element) }
     }
 
     func quitSelectedApp() {
         guard items.indices.contains(selected) else { return }
         let app = items[selected].app
         app.terminate()
-        items.removeAll { $0.app.processIdentifier == app.processIdentifier }
-        itemsChanged()
+        remove { $0.app.processIdentifier == app.processIdentifier }
     }
 
     func close() {
+        finishRemoval()
         active = false
         pendingShow?.cancel()
         pendingShow = nil
@@ -752,6 +900,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let loginItem = NSMenuItem(title: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
     let windowlessItem = NSMenuItem(title: "Show Apps Without Windows", action: #selector(toggleWindowless), keyEquivalent: "")
     let badgesItem = NSMenuItem(title: "Show Notification Badges", action: #selector(toggleBadges), keyEquivalent: "")
+    let updateAvailableItem = NSMenuItem(title: "", action: #selector(showUpdate), keyEquivalent: "")
+    let autoUpdateItem = NSMenuItem(title: "Check for Updates Automatically", action: #selector(toggleAutoUpdate), keyEquivalent: "")
+    var available: Updates.Release?
+    var updateTimer: Timer?
     var retryTimer: Timer?
     var cacheTimer: Timer?
 
@@ -762,6 +914,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         statusLine.isEnabled = false
         menu.addItem(statusLine)
+        updateAvailableItem.target = self
+        updateAvailableItem.isHidden = true
+        menu.addItem(updateAvailableItem)
         menu.addItem(.separator())
         windowlessItem.target = self
         badgesItem.target = self
@@ -773,6 +928,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(withTitle: "Open Accessibility Settings…",
                      action: #selector(openAccessibility), keyEquivalent: "").target = self
         menu.addItem(.separator())
+        autoUpdateItem.target = self
+        menu.addItem(autoUpdateItem)
+        menu.addItem(withTitle: "Check for Updates…",
+                     action: #selector(checkForUpdatesNow), keyEquivalent: "").target = self
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Deck",
                      action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem.menu = menu
@@ -783,6 +943,95 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(opts)
         tryStart()
+
+        // Check shortly after launch, then twice a day.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in self?.checkInBackground() }
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 12 * 3600, repeats: true) { [weak self] _ in
+            self?.checkInBackground()
+        }
+    }
+
+    // MARK: Updates
+
+    func checkInBackground() {
+        guard Settings.checkForUpdates else { return }
+        Updates.fetchLatest { [weak self] r in
+            guard let self, let r, Updates.isNewer(r.version, than: Updates.current) else { return }
+            self.setAvailable(r)
+            // Show the dialog once per version; after that it waits in the menu.
+            let key = "notifiedVersion"
+            guard UserDefaults.standard.string(forKey: key) != r.version else { return }
+            UserDefaults.standard.set(r.version, forKey: key)
+            self.presentUpdate(r)
+        }
+    }
+
+    @objc func checkForUpdatesNow() {
+        Updates.fetchLatest { [weak self] r in
+            guard let self else { return }
+            guard let r else {
+                self.alert("Couldn't check for updates", "Check your internet connection and try again.")
+                return
+            }
+            if Updates.isNewer(r.version, than: Updates.current) {
+                self.setAvailable(r)
+                self.presentUpdate(r)
+            } else {
+                self.alert("Deck is up to date", "Version \(Updates.current) is the newest version.")
+            }
+        }
+    }
+
+    func setAvailable(_ r: Updates.Release) {
+        available = r
+        updateAvailableItem.title = "Update Available: Deck \(r.version)…"
+        updateAvailableItem.isHidden = false
+    }
+
+    @objc func showUpdate() { if let r = available { presentUpdate(r) } }
+
+    func presentUpdate(_ r: Updates.Release) {
+        let a = NSAlert()
+        a.messageText = "Deck \(r.version) is available"
+        var info = "You have version \(Updates.current)."
+        if !r.notes.isEmpty { info += "\n\n" + String(r.notes.prefix(600)) }
+        let command = "brew upgrade --cask deck"
+        if Updates.viaHomebrew {
+            info += "\n\nUpdate with Homebrew:\n\(command)"
+            a.addButton(withTitle: "Copy Command")
+            a.addButton(withTitle: "Release Notes")
+        } else {
+            a.addButton(withTitle: "Download")
+        }
+        a.addButton(withTitle: "Later")
+        info += "\n\nAfter updating, grant Accessibility access to the new Deck again."
+        a.informativeText = info
+        if let icon = NSApp.applicationIconImage { a.icon = icon }
+        NSApp.activate(ignoringOtherApps: true)
+        let res = a.runModal()
+        if Updates.viaHomebrew {
+            if res == .alertFirstButtonReturn {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(command, forType: .string)
+            } else if res == .alertSecondButtonReturn {
+                NSWorkspace.shared.open(r.url)
+            }
+        } else if res == .alertFirstButtonReturn {
+            NSWorkspace.shared.open(r.url)
+        }
+    }
+
+    func alert(_ title: String, _ text: String) {
+        let a = NSAlert()
+        a.messageText = title
+        a.informativeText = text
+        NSApp.activate(ignoringOtherApps: true)
+        a.runModal()
+    }
+
+    @objc func toggleAutoUpdate() {
+        Settings.checkForUpdates.toggle()
+        if Settings.checkForUpdates { checkInBackground() }
     }
 
     func tryStart() {
@@ -843,6 +1092,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         windowlessItem.state = Settings.showWindowless ? .on : .off
         badgesItem.state = Settings.showBadges ? .on : .off
+        autoUpdateItem.state = Settings.checkForUpdates ? .on : .off
         switch SMAppService.mainApp.status {
         case .enabled:
             loginItem.state = .on
@@ -884,6 +1134,20 @@ if CommandLine.arguments.contains("--preview") {
     DispatchQueue.main.async { switcher.showPanel() }
     DispatchQueue.main.asyncAfter(deadline: .now() + 8) { exit(0) }
     app.run()
+}
+
+// `Deck --check-updates` prints the latest release (to test the update check).
+if CommandLine.arguments.contains("--check-updates") {
+    Updates.fetchLatest { r in
+        if let r {
+            print("Installed \(Updates.current), latest \(r.version), newer: \(Updates.isNewer(r.version, than: Updates.current))")
+            print("Homebrew: \(Updates.viaHomebrew), page: \(r.url)")
+        } else {
+            print("Could not reach GitHub.")
+        }
+        exit(0)
+    }
+    RunLoop.main.run()
 }
 
 // `Deck --restore` turns the system Cmd+Tab back on and exits (emergency brake).

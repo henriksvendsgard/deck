@@ -25,7 +25,8 @@
 - **Liquid Glass** look on macOS 26, measured against the system switcher
 - **Cmd+Q** quits the selected app and **Cmd+W** closes the selected window, without leaving the switcher
 - Opens at login, lives in the menu bar, no Dock icon
-- No network access, no telemetry. A single Swift file
+- Tells you when a new version is out (optional)
+- No telemetry. The only network request is the update check against GitHub. A single Swift file
 
 ## Install
 
@@ -65,7 +66,9 @@ Requires macOS 14 or later. Liquid Glass needs macOS 26. Older versions get a bl
 
 A quick Cmd+Tab switches straight to the previous window without showing the panel, like the system switcher does. You can also click or hover with the mouse.
 
-In the menu bar icon you can turn **Show Apps Without Windows**, **Show Notification Badges** and **Open at Login** on or off.
+In the menu bar icon you can turn **Show Apps Without Windows**, **Show Notification Badges**, **Open at Login** and **Check for Updates Automatically** on or off.
+
+Deck checks GitHub for a new release shortly after launch and twice a day. When there is one, it tells you once and adds **Update Available** to the menu. Nothing is downloaded or installed for you: with Homebrew, run `brew upgrade --cask deck`, otherwise download the new `Deck.zip`.
 
 **If Cmd+Tab stops working** (for example if Deck crashed), this turns the system switcher back on:
 ```bash
@@ -89,6 +92,7 @@ cd deck
 - `Tools/release.sh 1.2 "notes"` bumps the version, publishes the GitHub release and updates the Homebrew cask
 - `swift Tools/make-icon.swift` redraws the app icon
 - `Deck --preview` shows the panel with your running apps for 8 seconds, without taking over Cmd+Tab
+- `Deck --check-updates` prints the installed and the latest version
 
 ## How it works
 
@@ -96,6 +100,7 @@ cd deck
 - Windows are listed with the Accessibility API. Windows on other Spaces are found in the background with the same element-ID technique [AltTab](https://github.com/lwouis/alt-tab-macos) uses.
 - Focusing a window, finding windows on other Spaces and turning off the system hotkey use private SkyLight and HIServices functions. They are loaded at runtime, so Deck falls back to public APIs if they are missing.
 - Badges are read from the Dock's accessibility tree.
+- The update check reads `api.github.com/repos/henriksvendsgard/deck/releases/latest`. It sends no data about you or your windows.
 
 ## License
 
