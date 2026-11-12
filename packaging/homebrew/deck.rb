@@ -1,6 +1,6 @@
 cask "deck" do
-  version "1.1"
-  sha256 "1490abcdf8805883213ee3b98e1b4fa61566cb7652c1949f2249db474e57fc90"
+  version "1.2"
+  sha256 "8d5a04371c26b16cff2d775c359e5e8f9f791ddaaf5445ce44f61bb09c904cc0"
 
   url "https://github.com/henriksvendsgard/deck/releases/download/v#{version}/Deck.zip"
   name "Deck"
