@@ -6,6 +6,7 @@
 
 <p align="center">
   A Cmd+Tab window switcher for macOS that looks like the system switcher but shows <b>every window</b>, not just every app.
+  Free and open source.
 </p>
 
 <p align="center">
@@ -26,6 +27,7 @@
 - **Cmd+Q** quits the selected app and **Cmd+W** closes the selected window, without leaving the switcher
 - Opens at login, lives in the menu bar, no Dock icon
 - Tells you when a new version is out (optional)
+- Free and open source under the [MIT license](LICENSE). No trial, no license key
 - No telemetry. The only network request is the update check against GitHub. A single Swift file
 
 ## Install
